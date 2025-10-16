@@ -7,8 +7,13 @@ Flask server that bridges Easynews search to a Newznab-like API so you can add i
 1. Create and activate a Python 3.11+ virtual environment:
 
 ```
+# Windows (PowerShell)
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\Activate.ps1
+
+# Linux / macOS (bash/zsh)
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
 2. Install dependencies:
