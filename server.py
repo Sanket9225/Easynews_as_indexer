@@ -2,7 +2,7 @@ import base64
 import os
 import time
 from datetime import datetime, timezone
-from typing import List, Tuple
+from typing import Any, List, Optional
 
 from flask import Flask, Response, jsonify, request
 import json
@@ -93,27 +93,75 @@ def to_search_item(d: dict) -> SearchItem:
     )
 
 
+def _coerce_datetime(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(int(value), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.isdigit():
+            try:
+                return datetime.fromtimestamp(int(text), tz=timezone.utc)
+            except (OverflowError, OSError, ValueError):
+                return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z"):
+            try:
+                dt = datetime.strptime(text.replace("Z", "+0000"), fmt)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(timezone.utc)
+            except ValueError:
+                continue
+    return None
+
+
 def filter_and_map(json_data: dict, min_bytes: int) -> List[dict]:
     out: List[dict] = []
     for it in json_data.get("data", []):
-        # Extract core fields
-        # it may be list-like
-        try:
-            hash_id = it[0]
-            subject = it[6]
-            filename_no_ext = it[10]
-            ext = it[11]
-            size = it.get("size", 0) if isinstance(it, dict) else (it["size"] if isinstance(it, dict) and "size" in it else 0)
-        except Exception:
-            # dict-like numeric keys as strings
-            hash_id = it.get("0") if isinstance(it, dict) else None
-            subject = it.get("6") if isinstance(it, dict) else None
-            filename_no_ext = it.get("10") if isinstance(it, dict) else None
-            ext = it.get("11") if isinstance(it, dict) else None
-            size = it.get("size", 0) if isinstance(it, dict) else 0
+        hash_id: Optional[str] = None
+        subject: Optional[str] = None
+        filename_no_ext: Optional[str] = None
+        ext: Optional[str] = None
+        size: Any = 0
+        poster: Optional[str] = None
+        posted_raw: Any = None
+        sig: Optional[str] = None
+
+        if isinstance(it, list):
+            if len(it) >= 12:
+                hash_id = it[0]
+                subject = it[6]
+                filename_no_ext = it[10]
+                ext = it[11]
+            if len(it) > 7:
+                poster = it[7]
+            if len(it) > 8:
+                posted_raw = it[8]
+        elif isinstance(it, dict):
+            hash_id = it.get("hash") or it.get("0") or it.get("id")
+            subject = it.get("subject") or it.get("6")
+            filename_no_ext = it.get("filename") or it.get("10")
+            ext = it.get("ext") or it.get("11")
+            size = it.get("size", 0)
+            poster = it.get("poster") or it.get("7")
+            posted_raw = it.get("dtime") or it.get("date") or it.get("12")
+            sig = it.get("sig")
 
         if not hash_id or not ext:
             continue
+
+        filename_no_ext = filename_no_ext or ""
+        ext = ext or ""
 
         # Try to use numeric size if present; otherwise skip (can't verify <100MB rule)
         if not isinstance(size, int):
@@ -125,8 +173,7 @@ def filter_and_map(json_data: dict, min_bytes: int) -> List[dict]:
         if size < min_bytes:
             continue
 
-        title = subject or (filename_no_ext + ext)
-        sig = it.get("sig") if isinstance(it, dict) else None
+        title = subject or f"{filename_no_ext}{ext}"
 
         out.append(
             {
@@ -136,8 +183,8 @@ def filter_and_map(json_data: dict, min_bytes: int) -> List[dict]:
                 "sig": sig,
                 "size": size,
                 "title": title,
-                # Time fields: try index 7 or expires if available
-                "pub": it[7] if (isinstance(it, list) and len(it) > 7) else (it.get("7") if isinstance(it, dict) else None),
+                "poster": poster,
+                "posted": posted_raw,
             }
         )
     return out
@@ -193,6 +240,8 @@ def api():
                     "size": 700 * 1024 * 1024,
                     "title": "Sample Matrix Clip",
                     "sample": True,
+                    "poster": "sample@example.com",
+                    "posted": int(time.time()),
                 }
             ]
         else:
@@ -207,7 +256,8 @@ def api():
 
         display_q = raw_query if raw_query else q
         chan_title = f"Results for {display_q}"
-        now = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S %z")
+        now_dt = datetime.now(timezone.utc)
+        channel_pub = now_dt.strftime("%a, %d %b %Y %H:%M:%S %z")
 
         header = (
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -216,7 +266,7 @@ def api():
             f"<title>{xml_escape(chan_title)}</title>"
             f"<description>{xml_escape(chan_title)}</description>"
             f"<link>{request.url_root.rstrip('/')}/api</link>"
-            f"<pubDate>{now}</pubDate>"
+            f"<pubDate>{channel_pub}</pubDate>"
         )
 
         body_parts: List[str] = []
@@ -227,15 +277,27 @@ def api():
             safe_link = xml_escape(link)
             size = it["size"]
             guid = enc_id
-            pub = it.get("pub") or now
+            poster = it.get("poster")
+            posted_dt = _coerce_datetime(it.get("posted")) or now_dt
+            posted_str = posted_dt.strftime("%a, %d %b %Y %H:%M:%S %z")
+            posted_epoch = str(int(posted_dt.timestamp()))
+            attr_parts = [
+                f"<newznab:attr name=\"size\" value=\"{size}\"/>",
+                f"<newznab:attr name=\"category\" value=\"2000\"/>",
+                f"<newznab:attr name=\"usenetdate\" value=\"{posted_str}\"/>",
+                f"<newznab:attr name=\"posted\" value=\"{posted_epoch}\"/>",
+            ]
+            if poster:
+                attr_parts.append(f"<newznab:attr name=\"poster\" value=\"{xml_escape(poster)}\"/>")
+            attr_xml = "".join(attr_parts)
             item_xml = (
                 f"<item>"
                 f"<title>{title}</title>"
                 f"<guid isPermaLink=\"false\">{guid}</guid>"
                 f"<link>{safe_link}</link>"
                 f"<category>2000</category>"
-                f"<pubDate>{pub}</pubDate>"
-                f"<newznab:attr name=\"size\" value=\"{size}\"/>"
+                f"<pubDate>{posted_str}</pubDate>"
+                f"{attr_xml}"
                 f"<enclosure url=\"{safe_link}\" length=\"{size}\" type=\"application/x-nzb\"/>"
                 f"</item>"
             )
