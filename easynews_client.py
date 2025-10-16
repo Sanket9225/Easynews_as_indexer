@@ -196,11 +196,10 @@ class EasynewsClient:
             # Sometimes returns text/html with a redirect page; still try to save
             pass
 
+        content = r.content.replace(b'date=""', b'date="0"')  # normalize empty NZB date fields
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
         with open(out_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
+            f.write(content)
         return out_path
 
     def search_and_nzb(
