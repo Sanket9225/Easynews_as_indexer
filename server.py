@@ -167,11 +167,15 @@ def api():
     if t in ("search", "movie", "tvsearch"):
         raw_query = request.args.get("q", "")
         q = raw_query.strip()
+        fallback_query = False
         if not q or q.lower() == "test":  # allow Prowlarr test ping to pass with sample data
             q = "matrix"
+            fallback_query = True
         limit = int(request.args.get("limit", "100"))
         min_size_mb = int(request.args.get("minsize", "100"))
         min_bytes = min_size_mb * 1024 * 1024
+        if fallback_query:
+            min_bytes = min(10 * 1024 * 1024, min_bytes)  # ensure sample data not filtered out
 
         c = client()
         c.login()
