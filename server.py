@@ -1,5 +1,8 @@
 import base64
+import html
 import os
+import re
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, List, Optional
@@ -7,10 +10,14 @@ from typing import Any, List, Optional
 from flask import Flask, Response, jsonify, request
 import json
 
-from easynews_client import EasynewsClient, SearchItem
+from easynews_client import EasynewsClient, EasynewsError, SearchItem
 
 
 APP = Flask(__name__)
+_CLIENT: Optional[EasynewsClient] = None
+_CLIENT_LOCK = threading.Lock()
+_CLIENT_LOGIN_TTL = 600  # seconds
+_CLIENT_LAST_LOGIN: float = 0.0
 
 
 def _load_dotenv():
@@ -47,7 +54,21 @@ def require_apikey() -> bool:
 def client() -> EasynewsClient:
     if not EZ_USER or not EZ_PASS:
         raise RuntimeError("Set EASYNEWS_USER and EASYNEWS_PASS environment variables")
-    return EasynewsClient(EZ_USER, EZ_PASS)
+    global _CLIENT, _CLIENT_LAST_LOGIN
+    with _CLIENT_LOCK:
+        now = time.time()
+        if _CLIENT is None:
+            _CLIENT = EasynewsClient(EZ_USER, EZ_PASS)
+            _CLIENT.login()
+            _CLIENT_LAST_LOGIN = now
+        elif now - _CLIENT_LAST_LOGIN > _CLIENT_LOGIN_TTL:
+            try:
+                _CLIENT.login()
+            except EasynewsError:
+                _CLIENT = EasynewsClient(EZ_USER, EZ_PASS)
+                _CLIENT.login()
+            _CLIENT_LAST_LOGIN = time.time()
+        return _CLIENT
 
 
 def xml_escape(s: str) -> str:
@@ -91,6 +112,21 @@ def to_search_item(d: dict) -> SearchItem:
         type="VIDEO",
         raw={},
     )
+
+
+_TITLE_PARENS_RE = re.compile(r"\(([^()]*)\)")
+
+
+def _normalize_title(raw: str) -> str:
+    text = html.unescape(raw or "").strip()
+    if not text:
+        return text
+    matches = _TITLE_PARENS_RE.findall(text)
+    for candidate in reversed(matches):
+        cleaned = candidate.strip()
+        if cleaned:
+            return cleaned
+    return text
 
 
 def _coerce_datetime(value: Any) -> Optional[datetime]:
@@ -174,6 +210,7 @@ def filter_and_map(json_data: dict, min_bytes: int) -> List[dict]:
             continue
 
         title = subject or f"{filename_no_ext}{ext}"
+        title = _normalize_title(title)
 
         out.append(
             {
@@ -246,7 +283,6 @@ def api():
             ]
         else:
             c = client()
-            c.login()
             # aim for maximum results per page
             data = c.search(query=q, file_type="VIDEO", per_page=250, sort_field="relevance", sort_dir="-")
             items = filter_and_map(data, min_bytes=min_bytes)
@@ -328,7 +364,6 @@ def api():
             return resp
         si = to_search_item(d)
         c = client()
-        c.login()
         payload = c.build_nzb_payload([si], name=d.get("title"))
         # fetch content
         url = f"https://members.easynews.com/2.0/api/dl-nzb"
