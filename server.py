@@ -196,6 +196,7 @@ def api():
             enc_id = encode_id(it)
             title = xml_escape(it["title"]) if it["title"] else "Untitled"
             link = f"{request.url_root.rstrip('/')}/api?t=get&id={enc_id}&apikey={request.args.get('apikey')}"
+            safe_link = xml_escape(link)
             size = it["size"]
             guid = enc_id
             pub = it.get("pub") or now
@@ -203,11 +204,11 @@ def api():
                 f"<item>"
                 f"<title>{title}</title>"
                 f"<guid isPermaLink=\"false\">{guid}</guid>"
-                f"<link>{link}</link>"
+                f"<link>{safe_link}</link>"
                 f"<category>2000</category>"
                 f"<pubDate>{pub}</pubDate>"
                 f"<newznab:attr name=\"size\" value=\"{size}\"/>"
-                f"<enclosure url=\"{link}\" length=\"{size}\" type=\"application/x-nzb\"/>"
+                f"<enclosure url=\"{safe_link}\" length=\"{size}\" type=\"application/x-nzb\"/>"
                 f"</item>"
             )
             body_parts.append(item_xml)
