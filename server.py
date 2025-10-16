@@ -174,8 +174,14 @@ def api():
             q = "matrix"
             fallback_query = True
         limit = int(request.args.get("limit", "100"))
-        min_size_mb = int(request.args.get("minsize", "100"))
-        min_bytes = min_size_mb * 1024 * 1024
+        offset = int(request.args.get("offset", "0"))
+        min_size_param = request.args.get("minsize")
+        min_bytes = 0
+        if min_size_param:
+            try:
+                min_bytes = int(min_size_param) * 1024 * 1024
+            except ValueError:
+                min_bytes = 0
 
         if fallback_query:
             items = [
@@ -197,7 +203,7 @@ def api():
             items = filter_and_map(data, min_bytes=min_bytes)
 
         # Trim by limit (handles fallback and real queries)
-        items = items[:limit]
+        items = items[offset : offset + limit]
 
         display_q = raw_query if raw_query else q
         chan_title = f"Results for {display_q}"
