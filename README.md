@@ -25,7 +25,7 @@ NEWZNAB_APIKEY=testkey
 python server.py
 ```
 
-It starts on `http://127.0.0.1:8080`.
+It starts on `http://127.0.0.1:8081`.
 
 ## Endpoints
 
@@ -39,7 +39,7 @@ It starts on `http://127.0.0.1:8080`.
 ## Prowlarr integration
 
 Add a Newznab (custom) indexer in Prowlarr:
-- URL: `http://127.0.0.1:8080`
+- URL: `http://127.0.0.1:8081`
 - API Key: the same key in your `.env` (e.g., `testkey`)
 - Categories: Movies (2000)
 
