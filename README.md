@@ -4,7 +4,13 @@ Flask server that bridges Easynews search to a Newznab-like API so you can add i
 
 ## Setup
 
-1. Create and activate Python 3.11+.
+1. Create and activate a Python 3.11+ virtual environment:
+
+```
+python -m venv .venv
+.venv\Scripts\activate
+```
+
 2. Install dependencies:
 
 ```
