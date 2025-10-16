@@ -260,12 +260,13 @@ def api():
         limit = int(request.args.get("limit", "100"))
         offset = int(request.args.get("offset", "0"))
         min_size_param = request.args.get("minsize")
-        min_bytes = 0
+        min_size_mb = 100
         if min_size_param:
             try:
-                min_bytes = int(min_size_param) * 1024 * 1024
+                min_size_mb = max(100, int(min_size_param))
             except ValueError:
-                min_bytes = 0
+                min_size_mb = 100
+        min_bytes = min_size_mb * 1024 * 1024
 
         if fallback_query:
             items = [
