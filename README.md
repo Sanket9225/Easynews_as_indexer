@@ -40,22 +40,6 @@ It starts on `http://127.0.0.1:8081`.
 
 ## Setup (Docker)
 
-### Build locally
-
-```
-docker build -t easynews-indexer .
-```
-
-Run the image you just built (override the port with `-e PORT=...` if needed):
-
-```
-docker run --rm -it -p 8081:8081 \
-	-e EASYNEWS_USER=your_easynews_username \
-	-e EASYNEWS_PASS=your_easynews_password \
-	-e NEWZNAB_APIKEY=testkey \
-	-e PORT=8081 \
-	easynews-indexer
-```
 
 ### Pull from Docker Hub
 
