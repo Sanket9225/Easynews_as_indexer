@@ -50,7 +50,7 @@ docker pull sanket9225/easynewsindexer
 Run the published image (Linux/macOS shells):
 
 ```
-docker run --rm -it -p 8081:8081 \
+docker run --rm -d -p 8081:8081 \
 	-e EASYNEWS_USER=your_easynews_username \
 	-e EASYNEWS_PASS=your_easynews_password \
 	-e NEWZNAB_APIKEY=testkey \
@@ -58,16 +58,20 @@ docker run --rm -it -p 8081:8081 \
 	sanket9225/easynewsindexer
 ```
 
+> The published image currently includes `linux/amd64` and `linux/arm64` manifests.
+
 Windows PowerShell equivalent:
 
 ```
-docker run --rm -it -p 8081:8081 ^
+docker run --rm -d -p 8081:8081 ^
 	-e EASYNEWS_USER=your_easynews_username ^
 	-e EASYNEWS_PASS=your_easynews_password ^
 	-e NEWZNAB_APIKEY=testkey ^
 	-e PORT=8081 ^
 	sanket9225/easynewsindexer
 ```
+
+To tail logs from the detached container run `docker logs -f <container-id>`.
 
 ## Endpoints
 
