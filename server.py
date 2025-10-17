@@ -382,5 +382,5 @@ def api():
 
 
 if __name__ == "__main__":
-    # Local dev server
-    APP.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8081)))
+    port = int(os.environ.get("PORT", 8081))
+    APP.run(host="0.0.0.0", port=port)

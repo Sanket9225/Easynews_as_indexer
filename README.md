@@ -2,7 +2,7 @@
 
 Flask server that bridges Easynews search to a Newznab-like API so you can add it to Prowlarr as a custom indexer and download NZBs. Video-only, sorts by relevance, returns as many results as possible, and filters files smaller than 100 MB.
 
-## Setup
+## Setup (Local)
 
 1. Create and activate a Python 3.11+ virtual environment:
 
@@ -38,6 +38,53 @@ python server.py
 
 It starts on `http://127.0.0.1:8081`.
 
+## Setup (Docker)
+
+### Build locally
+
+```
+docker build -t easynews-indexer .
+```
+
+Run the image you just built (override the port with `-e PORT=...` if needed):
+
+```
+docker run --rm -it -p 8081:8081 \
+	-e EASYNEWS_USER=your_easynews_username \
+	-e EASYNEWS_PASS=your_easynews_password \
+	-e NEWZNAB_APIKEY=testkey \
+	-e PORT=8081 \
+	easynews-indexer
+```
+
+### Pull from Docker Hub
+
+```
+docker pull sanket9225/easynewsindexer
+```
+
+Run the published image (Linux/macOS shells):
+
+```
+docker run --rm -it -p 8081:8081 \
+	-e EASYNEWS_USER=your_easynews_username \
+	-e EASYNEWS_PASS=your_easynews_password \
+	-e NEWZNAB_APIKEY=testkey \
+	-e PORT=8081 \
+	sanket9225/easynewsindexer
+```
+
+Windows PowerShell equivalent:
+
+```
+docker run --rm -it -p 8081:8081 ^
+	-e EASYNEWS_USER=your_easynews_username ^
+	-e EASYNEWS_PASS=your_easynews_password ^
+	-e NEWZNAB_APIKEY=testkey ^
+	-e PORT=8081 ^
+	sanket9225/easynewsindexer
+```
+
 ## Endpoints
 
 - Caps: `GET /api?t=caps&apikey=<key>`
@@ -49,11 +96,6 @@ It starts on `http://127.0.0.1:8081`.
 
 ## Prowlarr integration
 
-Add a Newznab (custom) indexer in Prowlarr:
+Add a Newznab (generic) indexer in Prowlarr:
 - URL: `http://127.0.0.1:8081`
 - API Key: the same key in your `.env` (e.g., `testkey`)
-- Categories: Movies (2000)
-
-## Notes
-- Unofficial client: endpoints/params mirror the Easynews web app and may change.
-- Use your own Easynews account per their Terms of Service.
