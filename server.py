@@ -172,6 +172,8 @@ def filter_and_map(json_data: dict, min_bytes: int) -> List[dict]:
         poster: Optional[str] = None
         posted_raw: Any = None
         sig: Optional[str] = None
+        display_fn: Optional[str] = None
+        extension_field: Optional[str] = None
 
         if isinstance(it, list):
             if len(it) >= 12:
@@ -192,12 +194,16 @@ def filter_and_map(json_data: dict, min_bytes: int) -> List[dict]:
             poster = it.get("poster") or it.get("7")
             posted_raw = it.get("dtime") or it.get("date") or it.get("12")
             sig = it.get("sig")
+            display_fn = it.get("fn") or it.get("filename")
+            extension_field = it.get("extension") or it.get("ext")
 
         if not hash_id or not ext:
             continue
 
         filename_no_ext = filename_no_ext or ""
         ext = ext or ""
+        if extension_field and not ext:
+            ext = extension_field
 
         # Try to use numeric size if present; otherwise skip (can't verify <100MB rule)
         if not isinstance(size, int):
@@ -209,8 +215,21 @@ def filter_and_map(json_data: dict, min_bytes: int) -> List[dict]:
         if size < min_bytes:
             continue
 
-        title = subject or f"{filename_no_ext}{ext}"
-        title = _normalize_title(title)
+        title: Optional[str] = None
+        if display_fn:
+            cleaned = display_fn.strip()
+            if cleaned:
+                normalized = cleaned.replace(" - ", "-")
+                parts = [segment for segment in normalized.split(" ") if segment]
+                sanitized = ".".join(parts)
+                ext_component = extension_field or ext or ""
+                if ext_component and not ext_component.startswith("."):
+                    ext_component = f".{ext_component}"
+                title = f"{sanitized}{ext_component}" if ext_component else sanitized
+
+        if not title:
+            fallback = subject or f"{filename_no_ext}{ext}"
+            title = _normalize_title(fallback)
 
         out.append(
             {
