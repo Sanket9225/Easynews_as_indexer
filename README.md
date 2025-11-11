@@ -1,3 +1,5 @@
+# [☕ Please support my work on Buy Me a Coffee](https://buymeacoffee.com/gaikwadsank)
+
 # Easynews Newznab-like server
 
 Flask server that bridges Easynews search to a Newznab-like API so you can add it to Prowlarr as a custom indexer and download NZBs. Video-only, sorts by relevance, returns as many results as possible, and filters files smaller than 100 MB.
@@ -87,3 +89,7 @@ To tail logs from the detached container run `docker logs -f <container-id>`.
 Add a Newznab (generic) indexer in Prowlarr:
 - URL: `http://127.0.0.1:8081`
 - API Key: the same key in your `.env` (e.g., `testkey`)
+
+---
+
+## [☕ If this project helps you, consider buying me a coffee](https://buymeacoffee.com/gaikwadsank)
