@@ -11,6 +11,11 @@ from flask import Flask, Response, jsonify, request
 import json
 
 from easynews_client import EasynewsClient, EasynewsError, SearchItem
+import logging
+
+# Basic logging configuration to ensure logs are visible when running the app
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 
 APP = Flask(__name__)
@@ -18,6 +23,10 @@ _CLIENT: Optional[EasynewsClient] = None
 _CLIENT_LOCK = threading.Lock()
 _CLIENT_LOGIN_TTL = 600  # seconds
 _CLIENT_LAST_LOGIN: float = 0.0
+_CLIENT_FAIL_COUNT: int = 0
+_CLIENT_FAILED_UNTIL: float = 0.0
+_CLIENT_BACKOFF_BASE = 5  # seconds, base backoff multiplier
+_CLIENT_BACKOFF_MAX = 300  # seconds, max backoff
 
 
 def _load_dotenv():
@@ -55,18 +64,47 @@ def client() -> EasynewsClient:
     if not EZ_USER or not EZ_PASS:
         raise RuntimeError("Set EASYNEWS_USER and EASYNEWS_PASS environment variables")
     global _CLIENT, _CLIENT_LAST_LOGIN
+    global _CLIENT_FAIL_COUNT, _CLIENT_FAILED_UNTIL
     with _CLIENT_LOCK:
+        now = time.time()
+        # If we previously detected failures, and the backoff window hasn't expired, fail fast
+        if _CLIENT_FAILED_UNTIL and now < _CLIENT_FAILED_UNTIL:
+            raise EasynewsError("Upstream service in backoff window")
+
         now = time.time()
         if _CLIENT is None:
             _CLIENT = EasynewsClient(EZ_USER, EZ_PASS)
-            _CLIENT.login()
+            # login may raise EasynewsError on network/auth errors
+            try:
+                _CLIENT.login()
+            except EasynewsError:
+                # increment failure counter and set backoff window
+                _CLIENT_FAIL_COUNT = min(_CLIENT_FAIL_COUNT + 1, 10)
+                backoff = min(_CLIENT_BACKOFF_BASE * (2 ** (_CLIENT_FAIL_COUNT - 1)), _CLIENT_BACKOFF_MAX)
+                _CLIENT_FAILED_UNTIL = time.time() + backoff
+                logger.exception("Easynews login failed — entering backoff for %s seconds", backoff)
+                # Clear client object so next successful login will recreate
+                _CLIENT = None
+                raise
+            # Reset failure/backoff counters on successful login
+            _CLIENT_FAIL_COUNT = 0
+            _CLIENT_FAILED_UNTIL = 0.0
             _CLIENT_LAST_LOGIN = now
         elif now - _CLIENT_LAST_LOGIN > _CLIENT_LOGIN_TTL:
             try:
                 _CLIENT.login()
             except EasynewsError:
+                # If login fails on refresh, rotate the client and attempt once more
                 _CLIENT = EasynewsClient(EZ_USER, EZ_PASS)
-                _CLIENT.login()
+                try:
+                    _CLIENT.login()
+                except EasynewsError:
+                    _CLIENT_FAIL_COUNT = min(_CLIENT_FAIL_COUNT + 1, 10)
+                    backoff = min(_CLIENT_BACKOFF_BASE * (2 ** (_CLIENT_FAIL_COUNT - 1)), _CLIENT_BACKOFF_MAX)
+                    _CLIENT_FAILED_UNTIL = time.time() + backoff
+                    logger.exception("Easynews login refresh failed — entering backoff for %s seconds", backoff)
+                    _CLIENT = None
+                    raise
             _CLIENT_LAST_LOGIN = time.time()
         return _CLIENT
 
@@ -302,7 +340,12 @@ def api():
                 }
             ]
         else:
-            c = client()
+            try:
+                c = client()
+            except EasynewsError as e:
+                # login/network failure — record traceback-level info
+                logger.exception("Easynews client unavailable when attempting to search")
+                return Response("Upstream service unavailable", status=503)
             # aim for maximum results per page
             data = c.search(query=q, file_type="VIDEO", per_page=250, sort_field="relevance", sort_dir="-")
             items = filter_and_map(data, min_bytes=min_bytes)
@@ -383,11 +426,20 @@ def api():
             resp.headers["Content-Disposition"] = f"attachment; filename=\"{safe_title}.nzb\""
             return resp
         si = to_search_item(d)
-        c = client()
+        try:
+            c = client()
+        except EasynewsError as e:
+            logger.exception("Easynews client unavailable when building NZB")
+            return Response("Upstream service unavailable", status=503)
+
         payload = c.build_nzb_payload([si], name=d.get("title"))
         # fetch content
-        url = f"https://members.easynews.com/2.0/api/dl-nzb"
-        r = c.s.post(url, data=payload)
+        try:
+            r = c.s.post("https://members.easynews.com/2.0/api/dl-nzb", data=payload, timeout=60)
+        except Exception:
+            logger.exception("Error fetching NZB from upstream")
+            return Response("Upstream request failed", status=502)
+
         if r.status_code != 200:
             return Response(f"Upstream error {r.status_code}", status=502)
         # Name file as title.nzb
