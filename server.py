@@ -673,7 +673,7 @@ def api():
         if episode_int is not None:
             query_meta["episode"] = episode_int
         strict_param = request.args.get("strict")
-        strict_requested = t == "movie"
+        strict_requested = t in {"movie", "tvsearch"}
         if strict_param is not None:
             strict_requested = strict_param.strip().lower() not in {
                 "0",
