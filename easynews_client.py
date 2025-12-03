@@ -8,10 +8,10 @@ This client mimics the webapp behavior by calling:
 Authentication is cookie-based via username/password POST to the login endpoint.
 You'll need a valid Easynews account. Use responsibly and per Easynews TOS.
 """
+
 from __future__ import annotations
 
 import base64
-import json
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -49,15 +49,19 @@ class SearchItem:
 
 
 class EasynewsClient:
-    def __init__(self, username: str, password: str, session: Optional[requests.Session] = None):
+    def __init__(
+        self, username: str, password: str, session: Optional[requests.Session] = None
+    ):
         self.username = username
         self.password = password
         self.s = session or requests.Session()
         # Default headers
-        self.s.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) EasynewsClient/1.0",
-            "Accept": "application/json, text/javascript, */*; q=0.9",
-        })
+        self.s.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) EasynewsClient/1.0",
+                "Accept": "application/json, text/javascript, */*; q=0.9",
+            }
+        )
         # Use HTTP Basic Auth for endpoints that support it
         self.s.auth = (self.username, self.password)
 
@@ -113,7 +117,10 @@ class EasynewsClient:
         # fty[] is a repeated parameter
         url = f"{EASYNEWS_BASE}/2.0/search/solr-search/"
         # Manually build query string to include array param
-        query_params = "&".join([f"{k}={requests.utils.quote(v)}" for k, v in params.items()]) + f"&fty%5B%5D={requests.utils.quote(file_type)}"
+        query_params = (
+            "&".join([f"{k}={requests.utils.quote(v)}" for k, v in params.items()])
+            + f"&fty%5B%5D={requests.utils.quote(file_type)}"
+        )
         full_url = f"{url}?{query_params}"
 
         r = self.s.get(full_url)
@@ -152,15 +159,17 @@ class EasynewsClient:
                 # Skip malformed entries
                 continue
 
-            items.append(SearchItem(
-                id=item_id,
-                hash=hash_id,
-                filename=filename_no_ext,
-                ext=ext,
-                sig=sig,
-                type=typ,
-                raw=it if isinstance(it, dict) else {},
-            ))
+            items.append(
+                SearchItem(
+                    id=item_id,
+                    hash=hash_id,
+                    filename=filename_no_ext,
+                    ext=ext,
+                    sig=sig,
+                    type=typ,
+                    raw=it if isinstance(it, dict) else {},
+                )
+            )
         return items
 
     def build_nzb_payload(
@@ -196,7 +205,9 @@ class EasynewsClient:
             # Sometimes returns text/html with a redirect page; still try to save
             pass
 
-        content = r.content.replace(b'date=""', b'date="0"')  # normalize empty NZB date fields
+        content = r.content.replace(
+            b'date=""', b'date="0"'
+        )  # normalize empty NZB date fields
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
         with open(out_path, "wb") as f:
             f.write(content)

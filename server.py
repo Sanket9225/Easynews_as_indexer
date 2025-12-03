@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Set
 from urllib.parse import quote
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, request
 import json
 
 from easynews_client import EasynewsClient, EasynewsError, SearchItem
@@ -28,7 +28,7 @@ def _load_dotenv():
     try:
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
-                line=line.strip()
+                line = line.strip()
                 if not line or line.startswith("#"):
                     continue
                 if "=" in line:
@@ -93,7 +93,11 @@ def encode_id(item: dict) -> str:
     }
     if item.get("sample"):
         payload["sample"] = True
-    raw = base64.urlsafe_b64encode(json.dumps(payload, ensure_ascii=False).encode()).decode().rstrip("=")
+    raw = (
+        base64.urlsafe_b64encode(json.dumps(payload, ensure_ascii=False).encode())
+        .decode()
+        .rstrip("=")
+    )
     return raw
 
 
@@ -191,9 +195,21 @@ _MIN_DURATION_SECONDS = 60
 _TOKEN_SPLIT_RE = re.compile(r"[^\w]+", re.UNICODE)
 _QUALITY_RE = re.compile(r"(2160|1440|1080|720|480|360)\s*(p|i)?", re.IGNORECASE)
 _YEAR_RE = re.compile(r"(19|20)\d{2}")
-_SEASON_EP_RE = re.compile(r"(?:s(?P<season>\d{1,2})e(?P<episode>\d{1,2})|(?P<season2>\d{1,2})x(?P<episode2>\d{1,2}))", re.IGNORECASE)
+_SEASON_EP_RE = re.compile(
+    r"(?:s(?P<season>\d{1,2})e(?P<episode>\d{1,2})|(?P<season2>\d{1,2})x(?P<episode2>\d{1,2}))",
+    re.IGNORECASE,
+)
 _SANITIZE_SYMBOLS_RE = re.compile(r"[\.\-_:\s]+")
 _NON_ALNUM_RE = re.compile(r"[^\w\sÀ-ÿ]")
+
+# Newznab category constants
+CATEGORY_MOVIES = 2000
+CATEGORY_MOVIES_HD = 2030
+CATEGORY_MOVIES_UHD = 2040
+CATEGORY_TV = 5000
+CATEGORY_TV_HD = 5030
+CATEGORY_TV_UHD = 5040
+CATEGORY_OTHER = 7000
 
 
 def _parse_duration_seconds(raw: Any) -> Optional[int]:
@@ -245,7 +261,9 @@ def _tokenize(text: str) -> List[str]:
     if not text:
         return []
     normalized = _TOKEN_SPLIT_RE.sub(" ", text.lower())
-    tokens = [tok for tok in normalized.split() if len(tok) > 1 and tok not in _STOPWORDS]
+    tokens = [
+        tok for tok in normalized.split() if len(tok) > 1 and tok not in _STOPWORDS
+    ]
     return tokens
 
 
@@ -308,7 +326,9 @@ def _extract_quality(*texts: Optional[str]) -> Optional[str]:
     return None
 
 
-def _build_thumbnail_url(base: Optional[str], hash_id: Optional[str], slug: Optional[str]) -> Optional[str]:
+def _build_thumbnail_url(
+    base: Optional[str], hash_id: Optional[str], slug: Optional[str]
+) -> Optional[str]:
     if not base or not hash_id:
         return None
     base = base.rstrip("/") + "/"
@@ -317,7 +337,9 @@ def _build_thumbnail_url(base: Optional[str], hash_id: Optional[str], slug: Opti
     return f"{base}{prefix}/pr-{hash_id}.jpg/th-{safe_slug}.jpg"
 
 
-def _extract_release_markers(text: str, quality_hint: Optional[str] = None) -> Dict[str, Optional[Any]]:
+def _extract_release_markers(
+    text: str, quality_hint: Optional[str] = None
+) -> Dict[str, Optional[Any]]:
     info: Dict[str, Optional[Any]] = {}
     if not text:
         return info
@@ -336,6 +358,75 @@ def _extract_release_markers(text: str, quality_hint: Optional[str] = None) -> D
     if quality:
         info["quality"] = quality
     return info
+
+
+def _detect_category(title: str, metadata: Dict[str, Optional[Any]]) -> int:
+    """
+    Detect Newznab category based on filename and extracted metadata.
+
+    Detection logic:
+    1. TV shows: presence of season/episode patterns (SxxExx or xxyy)
+    2. Movies: presence of year, absence of TV patterns
+    3. Resolution subcategories: 720p+ = HD, 2160p/4K/UHD = UHD
+    4. Default to generic categories if uncertain
+
+    Args:
+        title: The filename/title to analyze
+        metadata: Dict with season, episode, year, quality keys
+
+    Returns:
+        Newznab category ID (int)
+    """
+    season = metadata.get("season")
+    episode = metadata.get("episode")
+    quality = metadata.get("quality")
+    year = metadata.get("year")
+
+    # Normalize quality for comparison
+    quality_lower = (quality or "").lower()
+
+    # Determine if HD or UHD based on resolution
+    is_uhd = False
+    is_hd = False
+
+    if quality_lower:
+        # UHD: 2160p or higher, or contains 4k/uhd keywords
+        if "2160" in quality_lower or "4k" in quality_lower or "uhd" in quality_lower:
+            is_uhd = True
+        # HD: 720p or 1080p
+        elif "720" in quality_lower or "1080" in quality_lower:
+            is_hd = True
+
+    # Check for TV show indicators
+    has_tv_pattern = season is not None or episode is not None
+
+    # Additional TV pattern check in title (case insensitive)
+    if not has_tv_pattern:
+        # Look for common TV patterns that might be missed
+        if _SEASON_EP_RE.search(title):
+            has_tv_pattern = True
+
+    # Categorize as TV show
+    if has_tv_pattern:
+        if is_uhd:
+            return CATEGORY_TV_UHD  # 5040
+        elif is_hd:
+            return CATEGORY_TV_HD  # 5030
+        else:
+            return CATEGORY_TV  # 5000
+
+    # Categorize as Movie (if has year or appears to be a movie)
+    # Movies typically have a year but no season/episode
+    if year or (not has_tv_pattern):
+        if is_uhd:
+            return CATEGORY_MOVIES_UHD  # 2040
+        elif is_hd:
+            return CATEGORY_MOVIES_HD  # 2030
+        else:
+            return CATEGORY_MOVIES  # 2000
+
+    # Default fallback to generic Movies
+    return CATEGORY_MOVIES  # 2000
 
 
 def _matches_strict(title: str, strict_phrase: Optional[str]) -> bool:
@@ -511,18 +602,26 @@ def api():
     t = request.args.get("t", "caps")
     if t == "caps":
         xml = (
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            '<?xml version="1.0" encoding="UTF-8"?>'
             "<caps>"
-            "<server version=\"0.1\" title=\"Easynews Bridge\"/>"
-            "<limits maxrequests=\"100\" defaultlimit=\"100\"/>"
-            "<registration available=\"no\" open=\"no\"/>"
+            '<server version="0.1" title="Easynews Bridge"/>'
+            '<limits max="100" default="100"/>'
+            '<registration available="no" open="no"/>'
             "<searching>"
-            "<search available=\"yes\" supportedParams=\"q\"/>"
-            "<movie-search available=\"yes\" supportedParams=\"q,year\"/>"
-            "<tv-search available=\"yes\" supportedParams=\"q,season,ep\"/>"
+            '<search available="yes" supportedParams="q"/>'
+            '<movie-search available="yes" supportedParams="q,year"/>'
+            '<tv-search available="yes" supportedParams="q,season,ep"/>'
             "</searching>"
             "<categories>"
-            "<category id=\"2000\" name=\"Movies\"/>"
+            '<category id="2000" name="Movies">'
+            '<subcat id="2030" name="Movies/HD"/>'
+            '<subcat id="2040" name="Movies/UHD"/>'
+            "</category>"
+            '<category id="5000" name="TV">'
+            '<subcat id="5030" name="TV/HD"/>'
+            '<subcat id="5040" name="TV/UHD"/>'
+            "</category>"
+            '<category id="7000" name="Other"/>'
             "</categories>"
             "</caps>"
         )
@@ -531,7 +630,11 @@ def api():
     if t in ("search", "movie", "tvsearch"):
         base_query = (request.args.get("q") or "").strip()
         season_param = request.args.get("season") or request.args.get("seasonnum")
-        episode_param = request.args.get("ep") or request.args.get("epnum") or request.args.get("episode")
+        episode_param = (
+            request.args.get("ep")
+            or request.args.get("epnum")
+            or request.args.get("episode")
+        )
         year_param = request.args.get("year") or request.args.get("yr")
         season_int = _as_int(season_param)
         episode_int = _as_int(episode_param)
@@ -556,7 +659,9 @@ def api():
         raw_query = search_label or base_query
         q = raw_query.strip()
         fallback_query = False
-        if not q or q.lower() == "test":  # allow Prowlarr validation calls to receive data
+        if (
+            not q or q.lower() == "test"
+        ):  # allow Prowlarr validation calls to receive data
             q = "matrix"
             fallback_query = True
         query_tokens = _tokenize(raw_query)
@@ -570,7 +675,12 @@ def api():
         strict_param = request.args.get("strict")
         strict_requested = t == "movie"
         if strict_param is not None:
-            strict_requested = strict_param.strip().lower() not in {"0", "false", "no", "off"}
+            strict_requested = strict_param.strip().lower() not in {
+                "0",
+                "false",
+                "no",
+                "off",
+            }
         strict_phrase = _sanitize_phrase(raw_query) if strict_requested else None
         limit = int(request.args.get("limit", "100"))
         offset = int(request.args.get("offset", "0"))
@@ -600,7 +710,13 @@ def api():
         else:
             c = client()
             # aim for maximum results per page
-            data = c.search(query=q, file_type="VIDEO", per_page=250, sort_field="relevance", sort_dir="-")
+            data = c.search(
+                query=q,
+                file_type="VIDEO",
+                per_page=250,
+                sort_field="relevance",
+                sort_dir="-",
+            )
             if fallback_query:
                 items = filter_and_map(data, min_bytes=min_bytes)
             else:
@@ -622,8 +738,8 @@ def api():
         channel_pub = now_dt.strftime("%a, %d %b %Y %H:%M:%S %z")
 
         header = (
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-            "<rss version=\"2.0\" xmlns:newznab=\"http://www.newznab.com/DTD/2010/feeds/attributes/\">"
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<rss version="2.0" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/">'
             "<channel>"
             f"<title>{xml_escape(chan_title)}</title>"
             f"<description>{xml_escape(chan_title)}</description>"
@@ -649,36 +765,55 @@ def api():
             year = it.get("year")
             season = it.get("season")
             episode = it.get("episode")
+
+            # Detect category based on title and metadata
+            title_text = it.get("title", "")
+            title_metadata = {
+                "season": season,
+                "episode": episode,
+                "year": year,
+                "quality": quality,
+            }
+            category_id = _detect_category(title_text, title_metadata)
+
             attr_parts = [
-                f"<newznab:attr name=\"size\" value=\"{size}\"/>",
-                f"<newznab:attr name=\"category\" value=\"2000\"/>",
-                f"<newznab:attr name=\"usenetdate\" value=\"{posted_str}\"/>",
-                f"<newznab:attr name=\"posted\" value=\"{posted_epoch}\"/>",
+                f'<newznab:attr name="size" value="{size}"/>',
+                f'<newznab:attr name="category" value="{category_id}"/>',
+                f'<newznab:attr name="usenetdate" value="{posted_str}"/>',
+                f'<newznab:attr name="posted" value="{posted_epoch}"/>',
             ]
             if poster:
-                attr_parts.append(f"<newznab:attr name=\"poster\" value=\"{xml_escape(poster)}\"/>")
+                attr_parts.append(
+                    f'<newznab:attr name="poster" value="{xml_escape(poster)}"/>'
+                )
             if quality:
-                attr_parts.append(f"<newznab:attr name=\"quality\" value=\"{xml_escape(quality)}\"/>")
+                attr_parts.append(
+                    f'<newznab:attr name="quality" value="{xml_escape(quality)}"/>'
+                )
             if duration_hms:
-                attr_parts.append(f"<newznab:attr name=\"duration\" value=\"{duration_hms}\"/>")
+                attr_parts.append(
+                    f'<newznab:attr name="duration" value="{duration_hms}"/>'
+                )
             if thumb:
-                attr_parts.append(f"<newznab:attr name=\"thumb\" value=\"{xml_escape(thumb)}\"/>")
+                attr_parts.append(
+                    f'<newznab:attr name="thumb" value="{xml_escape(thumb)}"/>'
+                )
             if year:
-                attr_parts.append(f"<newznab:attr name=\"year\" value=\"{year}\"/>")
+                attr_parts.append(f'<newznab:attr name="year" value="{year}"/>')
             if season:
-                attr_parts.append(f"<newznab:attr name=\"season\" value=\"{season}\"/>")
+                attr_parts.append(f'<newznab:attr name="season" value="{season}"/>')
             if episode:
-                attr_parts.append(f"<newznab:attr name=\"episode\" value=\"{episode}\"/>")
+                attr_parts.append(f'<newznab:attr name="episode" value="{episode}"/>')
             attr_xml = "".join(attr_parts)
             item_xml = (
                 f"<item>"
                 f"<title>{title}</title>"
-                f"<guid isPermaLink=\"false\">{guid}</guid>"
+                f'<guid isPermaLink="false">{guid}</guid>'
                 f"<link>{safe_link}</link>"
-                f"<category>2000</category>"
+                f"<category>{category_id}</category>"
                 f"<pubDate>{posted_str}</pubDate>"
                 f"{attr_xml}"
-                f"<enclosure url=\"{safe_link}\" length=\"{size}\" type=\"application/x-nzb\"/>"
+                f'<enclosure url="{safe_link}" length="{size}" type="application/x-nzb"/>'
                 f"</item>"
             )
             body_parts.append(item_xml)
@@ -696,29 +831,36 @@ def api():
             title = d.get("title", "Sample Item")
             safe_title = "sample"
             nzb_content = (
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                "<nzb xmlns=\"http://www.newzbin.com/DTD/2003/nzb\">"
-                "<file subject=\"Sample Matrix Clip\" date=\"0\" poster=\"sample@example.com\">"
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">'
+                '<file subject="Sample Matrix Clip" date="0" poster="sample@example.com">'
                 "<groups><group>alt.binaries.sample</group></groups>"
-                "<segments><segment bytes=\"1024\" number=\"1\">sample</segment></segments>"
+                '<segments><segment bytes="1024" number="1">sample</segment></segments>'
                 "</file></nzb>"
             ).encode("utf-8")
             resp = Response(nzb_content, mimetype="application/x-nzb")
-            resp.headers["Content-Disposition"] = f"attachment; filename=\"{safe_title}.nzb\""
+            resp.headers["Content-Disposition"] = (
+                f'attachment; filename="{safe_title}.nzb"'
+            )
             return resp
         si = to_search_item(d)
         c = client()
         payload = c.build_nzb_payload([si], name=d.get("title"))
         # fetch content
-        url = f"https://members.easynews.com/2.0/api/dl-nzb"
+        url = "https://members.easynews.com/2.0/api/dl-nzb"
         r = c.s.post(url, data=payload)
         if r.status_code != 200:
             return Response(f"Upstream error {r.status_code}", status=502)
         # Name file as title.nzb
         title = d.get("title") or (d.get("filename", "download") + d.get("ext", ""))
-        safe_title = "".join(ch for ch in title if ch.isalnum() or ch in (" ", "-", "_", "."))[:200].strip() or "download"
+        safe_title = (
+            "".join(ch for ch in title if ch.isalnum() or ch in (" ", "-", "_", "."))[
+                :200
+            ].strip()
+            or "download"
+        )
         resp = Response(r.content, mimetype="application/x-nzb")
-        resp.headers["Content-Disposition"] = f"attachment; filename=\"{safe_title}.nzb\""
+        resp.headers["Content-Disposition"] = f'attachment; filename="{safe_title}.nzb"'
         return resp
 
     return Response("Unsupported 't' parameter", status=400)
