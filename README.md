@@ -43,10 +43,10 @@ It starts on `http://127.0.0.1:8081`.
 ## Setup (Docker)
 
 
-### Pull from Docker Hub
+### Pull from GitHub Container Registry
 
 ```
-docker pull sanket9225/easynewsindexer
+docker pull ghcr.io/sanket9225/easynews_as_indexer:latest
 ```
 
 Run the published image (Linux/macOS shells):
@@ -57,7 +57,7 @@ docker run --rm -d -p 8081:8081 \
 	-e EASYNEWS_PASS=your_easynews_password \
 	-e NEWZNAB_APIKEY=testkey \
 	-e PORT=8081 \
-	sanket9225/easynewsindexer
+	ghcr.io/sanket9225/easynews_as_indexer:latest
 ```
 
 > The published image currently includes `linux/amd64` and `linux/arm64` manifests.
@@ -70,7 +70,7 @@ docker run --rm -d -p 8081:8081 ^
 	-e EASYNEWS_PASS=your_easynews_password ^
 	-e NEWZNAB_APIKEY=testkey ^
 	-e PORT=8081 ^
-	sanket9225/easynewsindexer
+	ghcr.io/sanket9225/easynews_as_indexer:latest
 ```
 
 To tail logs from the detached container run `docker logs -f <container-id>`.
