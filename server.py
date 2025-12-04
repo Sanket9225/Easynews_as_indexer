@@ -209,6 +209,12 @@ CATEGORY_MOVIES_UHD = 2040
 CATEGORY_TV = 5000
 CATEGORY_TV_HD = 5030
 CATEGORY_TV_UHD = 5040
+
+# Anime categories (add these so Prowlarr/Sonarr can map anime properly)
+CATEGORY_ANIME = 5070
+CATEGORY_ANIME_HD = 5073
+CATEGORY_ANIME_UHD = 5074
+
 CATEGORY_OTHER = 7000
 
 
@@ -360,22 +366,24 @@ def _extract_release_markers(
     return info
 
 
+def _contains_japanese(text: Optional[str]) -> bool:
+    """Return True if text contains Hiragana, Katakana or CJK (Kanji) characters."""
+    if not text:
+        return False
+    # Hiragana + Katakana + CJK Unified Ideographs ranges
+    return bool(re.search(r"[\u3040-\u30ff\u4e00-\u9fff]", text))
+
+
 def _detect_category(title: str, metadata: Dict[str, Optional[Any]]) -> int:
     """
     Detect Newznab category based on filename and extracted metadata.
 
     Detection logic:
-    1. TV shows: presence of season/episode patterns (SxxExx or xxyy)
-    2. Movies: presence of year, absence of TV patterns
-    3. Resolution subcategories: 720p+ = HD, 2160p/4K/UHD = UHD
-    4. Default to generic categories if uncertain
-
-    Args:
-        title: The filename/title to analyze
-        metadata: Dict with season, episode, year, quality keys
-
-    Returns:
-        Newznab category ID (int)
+    1. Anime: title contains 'anime' or common anime markers or Japanese script
+    2. TV shows: presence of season/episode patterns (SxxExx or xxyy)
+    3. Movies: presence of year, absence of TV patterns
+    4. Resolution subcategories: 720p+ = HD, 2160p/4K/UHD = UHD
+    5. Default to generic categories if uncertain
     """
     season = metadata.get("season")
     episode = metadata.get("episode")
@@ -402,11 +410,30 @@ def _detect_category(title: str, metadata: Dict[str, Optional[Any]]) -> int:
 
     # Additional TV pattern check in title (case insensitive)
     if not has_tv_pattern:
-        # Look for common TV patterns that might be missed
         if _SEASON_EP_RE.search(title):
             has_tv_pattern = True
 
-    # Categorize as TV show
+    title_lower = (title or "").lower()
+
+    # 1) Detect Anime: heuristic
+    # - explicit 'anime' in title
+    # - presence of Japanese characters (strong indicator for anime)
+    # - common anime markers like 'ova', 'ona', 'subbed', etc.
+    if (
+        "anime" in title_lower
+        or _contains_japanese(title)
+        or re.search(r"\bova\b", title_lower)
+        or re.search(r"\bona\b", title_lower)
+        or re.search(r"\bsubbed\b", title_lower)
+    ):
+        if is_uhd:
+            return CATEGORY_ANIME_UHD
+        elif is_hd:
+            return CATEGORY_ANIME_HD
+        else:
+            return CATEGORY_ANIME
+
+    # 2) Categorize as TV show
     if has_tv_pattern:
         if is_uhd:
             return CATEGORY_TV_UHD  # 5040
@@ -415,7 +442,7 @@ def _detect_category(title: str, metadata: Dict[str, Optional[Any]]) -> int:
         else:
             return CATEGORY_TV  # 5000
 
-    # Categorize as Movie (if has year or appears to be a movie)
+    # 3) Categorize as Movie (if has year or appears to be a movie)
     # Movies typically have a year but no season/episode
     if year or (not has_tv_pattern):
         if is_uhd:
@@ -614,12 +641,16 @@ def api():
             "</searching>"
             "<categories>"
             '<category id="2000" name="Movies">'
-            '<subcat id="2030" name="Movies/HD"/>'
-            '<subcat id="2040" name="Movies/UHD"/>'
+            '<subcat id="2030" name="HD"/>'
+            '<subcat id="2040" name="UHD"/>'
             "</category>"
             '<category id="5000" name="TV">'
-            '<subcat id="5030" name="TV/HD"/>'
-            '<subcat id="5040" name="TV/UHD"/>'
+            '<subcat id="5030" name="HD"/>'
+            '<subcat id="5040" name="UHD"/>'
+            "</category>"
+            '<category id="5070" name="Anime">'
+            '<subcat id="5073" name="HD"/>'
+            '<subcat id="5074" name="UHD"/>'
             "</category>"
             '<category id="7000" name="Other"/>'
             "</categories>"

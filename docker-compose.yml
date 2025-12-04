@@ -1,0 +1,16 @@
+version: "3.8"
+
+services:
+  easynews:
+    image: ghcr.io/l0n3wanderer/easynews_as_indexer:fix-anime
+    container_name: easynews_as_indexer
+    env_file:
+      - .env
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
