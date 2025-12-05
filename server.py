@@ -629,6 +629,7 @@ def api():
 
     if t in ("search", "movie", "tvsearch"):
         base_query = (request.args.get("q") or "").strip()
+        cat_param = request.args.get("cat") or ""
         season_param = request.args.get("season") or request.args.get("seasonnum")
         episode_param = (
             request.args.get("ep")
@@ -662,7 +663,12 @@ def api():
         if (
             not q or q.lower() == "test"
         ):  # allow Prowlarr validation calls to receive data
-            q = "matrix"
+            # Check if TV categories are requested
+            tv_categories = {"5000", "5030", "5040"}
+            requested_categories = set(cat_param.split(",")) if cat_param else set()
+            wants_tv = t == "tvsearch" or bool(requested_categories & tv_categories)
+            # Use TV fallback if TV categories requested, movie fallback otherwise
+            q = "breaking bad" if wants_tv else "matrix"
             fallback_query = True
         query_tokens = _tokenize(raw_query)
         query_meta = _extract_release_markers(raw_query)
@@ -694,19 +700,41 @@ def api():
         min_bytes = min_size_mb * 1024 * 1024
 
         if fallback_query:
-            items = [
-                {
-                    "hash": "SAMPLEHASH1234567890",
-                    "filename": "sample.matrix.clip",
-                    "ext": ".mkv",
-                    "sig": None,
-                    "size": 700 * 1024 * 1024,
-                    "title": "Sample Matrix Clip",
-                    "sample": True,
-                    "poster": "sample@example.com",
-                    "posted": int(time.time()),
-                }
-            ]
+            # Check if TV categories are requested
+            tv_categories = {"5000", "5030", "5040"}
+            requested_categories = set(cat_param.split(",")) if cat_param else set()
+            wants_tv = t == "tvsearch" or bool(requested_categories & tv_categories)
+
+            if wants_tv:
+                # TV-appropriate fallback for Sonarr
+                items = [
+                    {
+                        "hash": "SAMPLEHASH_TV123456",
+                        "filename": "sample.tv.show.s01e01.1080p.mkv",
+                        "ext": ".mkv",
+                        "sig": None,
+                        "size": 800 * 1024 * 1024,
+                        "title": "Sample TV Show S01E01 1080p",
+                        "sample": True,
+                        "poster": "sample@example.com",
+                        "posted": int(time.time()),
+                    }
+                ]
+            else:
+                # Movie fallback for Radarr
+                items = [
+                    {
+                        "hash": "SAMPLEHASH1234567890",
+                        "filename": "sample.matrix.clip",
+                        "ext": ".mkv",
+                        "sig": None,
+                        "size": 700 * 1024 * 1024,
+                        "title": "Sample Matrix Clip",
+                        "sample": True,
+                        "poster": "sample@example.com",
+                        "posted": int(time.time()),
+                    }
+                ]
         else:
             c = client()
             # aim for maximum results per page
