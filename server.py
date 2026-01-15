@@ -754,7 +754,8 @@ def api():
             link = f"{request.url_root.rstrip('/')}/api?t=get&id={enc_id}&apikey={request.args.get('apikey')}"
             safe_link = xml_escape(link)
             size = it["size"]
-            guid = enc_id
+            # Use stable GUID based only on Easynews hash - this is critical for Sonarr blacklisting!
+            guid = it["hash"]
             poster = it.get("poster")
             posted_dt = _coerce_datetime(it.get("posted")) or now_dt
             posted_str = posted_dt.strftime("%a, %d %b %Y %H:%M:%S %z")
