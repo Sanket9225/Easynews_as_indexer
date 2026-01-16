@@ -491,7 +491,7 @@ def filter_and_map(
             ext = it.get("ext") or it.get("11")
             size = it.get("size", 0)
             poster = it.get("poster") or it.get("7")
-            posted_raw = it.get("dtime") or it.get("date") or it.get("12")
+            posted_raw = it.get("timestamp") or it.get("ts") or it.get("dtime") or it.get("date") or it.get("12")
             sig = it.get("sig")
             display_fn = it.get("fn") or it.get("filename")
             extension_field = it.get("extension") or it.get("ext")
@@ -754,7 +754,10 @@ def api():
             link = f"{request.url_root.rstrip('/')}/api?t=get&id={enc_id}&apikey={request.args.get('apikey')}"
             safe_link = xml_escape(link)
             size = it["size"]
-            guid = enc_id
+            # Use URL-based GUID like working indexers (DrunkenSlug style)
+            base_url = request.url_root.rstrip('/')
+            guid = f"{base_url}/details/{it['hash']}"
+            description = xml_escape(it["title"]) if it["title"] else "Untitled"
             poster = it.get("poster")
             posted_dt = _coerce_datetime(it.get("posted")) or now_dt
             posted_str = posted_dt.strftime("%a, %d %b %Y %H:%M:%S %z")
@@ -808,10 +811,12 @@ def api():
             item_xml = (
                 f"<item>"
                 f"<title>{title}</title>"
-                f'<guid isPermaLink="false">{guid}</guid>'
+                f"<description>{description}</description>"
+                f'<guid>{guid}</guid>'
                 f"<link>{safe_link}</link>"
                 f"<category>{category_id}</category>"
                 f"<pubDate>{posted_str}</pubDate>"
+                f"<size>{size}</size>"
                 f"{attr_xml}"
                 f'<enclosure url="{safe_link}" length="{size}" type="application/x-nzb"/>'
                 f"</item>"
