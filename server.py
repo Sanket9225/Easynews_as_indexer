@@ -325,8 +325,10 @@ def _is_flagged_item(item: Any, ext: str, duration_seconds: Optional[int]) -> bo
         return True
     if file_type and file_type != "VIDEO":
         return True
-    if ext and ext.lower() not in _ALLOWED_VIDEO_EXTENSIONS:
-        return True
+    if ext:
+        normalized_ext = ext.lower() if ext.startswith(".") else f".{ext.lower()}"
+        if normalized_ext not in _ALLOWED_VIDEO_EXTENSIONS:
+            return True
     if duration_seconds is not None and duration_seconds < _MIN_DURATION_SECONDS:
         return True
     return False
@@ -556,6 +558,8 @@ def filter_and_map(
                 subject = it[6]
                 filename_no_ext = it[10]
                 ext = it[11]
+            if len(it) > 4:
+                size = it[4]
             if len(it) > 7:
                 poster = it[7]
             if len(it) > 8:
@@ -583,6 +587,9 @@ def filter_and_map(
         ext = ext or ""
         if extension_field and not ext:
             ext = extension_field
+        # Normalize ext to always have a leading dot
+        if ext and not ext.startswith("."):
+            ext = f".{ext}"
 
         # Try to use numeric size if present; otherwise skip (can't verify <100MB rule)
         if not isinstance(size, int):
@@ -591,7 +598,7 @@ def filter_and_map(
             except Exception:
                 size = 0
 
-        if size < min_bytes:
+        if size > 0 and size < min_bytes:
             continue
 
         duration_seconds = _parse_duration_seconds(duration_raw)
@@ -860,6 +867,25 @@ def api():
                     strict_match=strict_requested,
                 )
 
+        # Filter by requested categories if cat param provided
+        if cat_param:
+            requested_cats: Set[int] = set()
+            for c_str in cat_param.split(","):
+                c_str = c_str.strip()
+                if c_str.isdigit():
+                    requested_cats.add(int(c_str))
+            if requested_cats:
+                filtered_items = []
+                for it in items:
+                    title_text = it.get("title", "")
+                    title_metadata = _extract_release_markers(title_text, it.get("quality"))
+                    cat_id = _detect_category(title_text, title_metadata)
+                    # Match exact category or parent category (e.g. 5030 matches 5000)
+                    parent_cat = (cat_id // 1000) * 1000
+                    if cat_id in requested_cats or parent_cat in requested_cats:
+                        filtered_items.append(it)
+                items = filtered_items
+
         # Trim by limit (handles fallback and real queries)
         items = items[offset : offset + limit]
 
@@ -868,6 +894,7 @@ def api():
         now_dt = datetime.now(timezone.utc)
         channel_pub = now_dt.strftime("%a, %d %b %Y %H:%M:%S %z")
 
+        total = len(items)
         header = (
             '<?xml version="1.0" encoding="UTF-8"?>'
             '<rss version="2.0" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/">'
@@ -876,6 +903,7 @@ def api():
             f"<description>{xml_escape(chan_title)}</description>"
             f"<link>{request.url_root.rstrip('/')}/api</link>"
             f"<pubDate>{channel_pub}</pubDate>"
+            f'<newznab:response offset="{offset}" total="{total}"/>'
         )
 
         body_parts: List[str] = []
